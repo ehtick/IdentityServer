@@ -5,31 +5,31 @@ using Logicality.GitHub.Actions.Workflow;
 using static GitHubContexts;
 
 var contexts = Instance;
-Component[] components = [
-    new("bff",
-        ["Duende.Bff", "Duende.Bff.Blazor", "Duende.Bff.Blazor.Client", "Duende.Bff.EntityFramework", "Duende.Bff.Yarp"],
-        ["Duende.Bff.Tests", "Duende.Bff.EntityFramework.Tests", "Duende.Bff.Blazor.UnitTests", "Duende.Bff.Blazor.Client.UnitTests"],
-        "bff"),
 
-    new("identity-server", 
-        ["AspNetIdentity", "Configuration", "Configuration.EntityFramework", "EntityFramework", "EntityFramework.Storage", "IdentityServer", "Storage"],
-        ["Configuration.IntegrationTests", "EntityFramework.IntegrationTests", "EntityFramework.Storage.IntegrationTests", "EntityFramework.Storage.UnitTests", "IdentityServer.IntegrationTests", "IdentityServer.UnitTests"],
-        "is")
-];
-
-foreach (var component in components)
 {
-    GenerateCiWorkflow(component);
-    GenerateReleaseWorkflow(component);
+    Product identityServer = new("identity-server", "identity-server.slnf", "is");
+    GenerateIdentityServerWorkflow(identityServer);
+    GenerateIdentityServerReleaseWorkflow(identityServer);
+    GenerateCodeQlWorkflow(identityServer, "38 15 * * 0");
 }
 
-void GenerateCiWorkflow(Component component)
 {
-    var workflow = new Workflow($"{component.Name}/ci");
-    var paths    = new[]
+    Product bff = new("bff", "bff.slnf", "bff");
+    GenerateBffWorkflow(bff);
+    GenerateBffReleaseWorkflow(bff);
+    GenerateCodeQlWorkflow(bff, "38 16 * * 0");
+}
+
+GenerateTemplatesReleaseWorkflow(new Product("templates", "../artifacts/templates.csproj", "templates"));
+
+
+void GenerateIdentityServerWorkflow(Product product)
+{
+    var workflow = new Workflow($"{product.Name}/ci");
+    var paths = new[]
     {
-        $".github/workflows/{component.Name}-**", 
-        $"{component.Name}/**",
+        $".github/workflows/{product.Name}-**",
+        $"{product.Name}/**",
         "Directory.Packages.props"
     };
 
@@ -49,13 +49,13 @@ void GenerateCiWorkflow(Component component)
         .RunEitherOnBranchOrAsPR()
         .Name("Build")
         .RunsOn(GitHubHostedRunners.UbuntuLatest)
-        .Defaults().Run("bash", component.Name)
+        .Defaults().Run("bash", product.Name)
         .Job;
 
     job.Permissions(
         actions: Permission.Read,
         contents: Permission.Read,
-        checks: Permission.Write, 
+        checks: Permission.Write,
         packages: Permission.Write);
 
     job.TimeoutMinutes(15);
@@ -65,77 +65,66 @@ void GenerateCiWorkflow(Component component)
 
     job.StepSetupDotNet();
 
-    foreach (var testProject in component.Tests)
-    {
-        job.StepTestAndReport(component.Name, testProject);
-    }
+    job.StepBuild(product.Solution);
+
+    job.StepTest(product.Solution);
 
     job.StepToolRestore();
 
-    foreach (var project in component.Projects)
-    {
-        job.StepPack(project);
-    }
+    job.StepPack(product.Solution);
 
     job.StepSign();
 
-    job.StepPush("MyGet", "https://www.myget.org/F/duende_identityserver/api/v2/package", "MYGET");
+    job.StepPushToGithub(contexts);
 
-    job.StepPush("GitHub", "https://nuget.pkg.github.com/DuendeSoftware/index.json", "GITHUB_TOKEN")
-        .Env(("GITHUB_TOKEN", contexts.Secrets.GitHubToken),
-            ("NUGET_AUTH_TOKEN", contexts.Secrets.GitHubToken));
+    job.StepUploadArtifacts(product.Name);
 
-    job.StepUploadArtifacts(component.Name);
-
-    var fileName = $"{component.Name}-ci";
+    var fileName = $"{product.Name}-ci";
     WriteWorkflow(workflow, fileName);
 }
-
-void GenerateReleaseWorkflow(Component component)
+void GenerateIdentityServerReleaseWorkflow(Product product)
 {
-    var workflow = new Workflow($"{component.Name}/release");
+    var workflow = new Workflow($"{product.Name}/release");
 
     workflow.On
         .WorkflowDispatch()
-        .Inputs(new StringInput("version", "Version in format X.Y.Z or X.Y.Z-preview.", true, "0.0.0"));
+        .InputVersionBranchAndTagOverride();
 
     workflow.EnvDefaults();
 
-    var tagJob = workflow
+    var job = workflow
         .Job("tag")
         .Name("Tag and Pack")
         .RunsOn(GitHubHostedRunners.UbuntuLatest)
         .Permissions(contents: Permission.Write, packages: Permission.Write)
-        .Defaults().Run("bash", component.Name).Job;
+        .Defaults().Run("bash", product.Name).Job;
 
-    tagJob.Step()
+    job.Step()
         .ActionsCheckout();
 
-    tagJob.StepSetupDotNet();
+    job.StepGitCheckoutCustomBranch();
+    job.StepGitConfig();
+    job.StepGitRemoveExistingTagIfConfigured(product, contexts);
+    job.StepGitPushTag(product, contexts);
 
-    tagJob.Step()
+    job.StepSetupDotNet();
+
+    job.Step()
         .Name("Git tag")
         .Run($@"git config --global user.email ""github-bot@duendesoftware.com""
 git config --global user.name ""Duende Software GitHub Bot""
-git tag -a {component.TagPrefix}-{contexts.Event.Input.Version} -m ""Release v{contexts.Event.Input.Version}""
-git push origin {component.TagPrefix}-{contexts.Event.Input.Version}");
+git tag -a {product.TagPrefix}-{contexts.Event.Input.Version} -m ""Release v{contexts.Event.Input.Version}""
+git push origin {product.TagPrefix}-{contexts.Event.Input.Version}");
 
-    foreach (var project in component.Projects)
-    {
-        tagJob.StepPack(project);
-    }
+    job.StepPack(product.Solution);
 
-    tagJob.StepToolRestore();
+    job.StepToolRestore();
 
-    tagJob.StepSign();
+    job.StepSign(always: true);
 
-    tagJob.StepPush("MyGet", "https://www.myget.org/F/duende_identityserver/api/v2/package", "MYGET");
+    job.StepPushToGithub(contexts, pushAlways: true);
 
-    tagJob.StepPush("GitHub", "https://nuget.pkg.github.com/DuendeSoftware/index.json", "GITHUB_TOKEN")
-        .Env(("GITHUB_TOKEN", contexts.Secrets.GitHubToken),
-            ("NUGET_AUTH_TOKEN", contexts.Secrets.GitHubToken));
-
-    tagJob.StepUploadArtifacts(component.Name);
+    job.StepUploadArtifacts(product.Name, uploadAlways: true);
 
     var publishJob = workflow.Job("publish")
         .Name("Publish to nuget.org")
@@ -154,9 +143,242 @@ git push origin {component.TagPrefix}-{contexts.Event.Input.Version}");
         .Shell("bash")
         .Run("tree");
 
-    publishJob.StepPush("nuget.org", "https://api.nuget.org/v3/index.json", "NUGET_ORG_API_KEY");
+    publishJob.StepPushToNuget(pushAlways: true);
 
-    var fileName = $"{component.Name}-release";
+    var fileName = $"{product.Name}-release";
+    WriteWorkflow(workflow, fileName);
+}
+
+void GenerateBffWorkflow(Product product)
+{
+    var workflow = new Workflow($"{product.Name}/ci");
+    var paths = new[]
+    {
+        $".github/workflows/{product.Name}-**",
+        $"{product.Name}/**",
+        "Directory.Packages.props"
+    };
+
+    workflow.On
+        .WorkflowDispatch();
+    workflow.On
+        .Push()
+        .Paths(paths);
+    workflow.On
+        .PullRequest()
+        .Paths(paths);
+
+    workflow.EnvDefaults();
+
+    var job = workflow
+        .Job("build")
+        .RunEitherOnBranchOrAsPR()
+        .Name("Build")
+        .RunsOn(GitHubHostedRunners.UbuntuLatest)
+        .Defaults().Run("bash", product.Name)
+        .Job;
+
+    job.Permissions(
+        actions: Permission.Read,
+        contents: Permission.Read,
+        checks: Permission.Write,
+        packages: Permission.Write);
+
+    job.TimeoutMinutes(15);
+
+    job.Step()
+        .ActionsCheckout();
+
+    job.StepSetupDotNet();
+
+    job.StepBuild(product.Solution);
+
+    // Devcerts are needed because some tests run start an a http server with https. 
+    job.StepDotNetDevCerts();
+
+    job.StepInstallPlayWright();
+
+    job.StepTest(product.Solution);
+
+    job.StepUploadPlaywrightTestTraces(product.Name);
+
+    job.StepToolRestore();
+
+    job.StepPack(product.Solution);
+
+    job.StepSign();
+
+    job.StepPushToGithub(contexts);
+
+    job.StepUploadArtifacts(product.Name);
+
+    var fileName = $"{product.Name}-ci";
+    WriteWorkflow(workflow, fileName);
+}
+void GenerateBffReleaseWorkflow(Product product)
+{
+    var workflow = new Workflow($"{product.Name}/release");
+
+    workflow.On
+        .WorkflowDispatch()
+        .InputVersionBranchAndTagOverride();
+
+    workflow.EnvDefaults();
+
+    var job = workflow
+        .Job("tag")
+        .Name("Tag and Pack")
+        .RunsOn(GitHubHostedRunners.UbuntuLatest)
+        .Permissions(contents: Permission.Write, packages: Permission.Write)
+        .Defaults().Run("bash", product.Name).Job;
+
+    job.Step()
+        .ActionsCheckout();
+
+    job.StepGitCheckoutCustomBranch();
+    job.StepGitConfig();
+    job.StepGitRemoveExistingTagIfConfigured(product, contexts);
+    job.StepGitPushTag(product, contexts);
+
+    job.StepSetupDotNet();
+
+    job.StepPack(product.Solution);
+
+    job.StepToolRestore();
+
+    job.StepSign(always: true);
+
+    job.StepPushToGithub(contexts, pushAlways: true);
+
+    job.StepUploadArtifacts(product.Name, uploadAlways: true);
+
+    var publishJob = workflow.Job("publish")
+        .Name("Publish to nuget.org")
+        .RunsOn(GitHubHostedRunners.UbuntuLatest)
+        .Needs("tag")
+        .Environment("nuget.org", "");
+
+    publishJob.Step()
+        .Uses("actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16") // 4.1.8
+        .With(("name", "artifacts"), ("path", "artifacts"));
+
+    publishJob.StepSetupDotNet();
+
+    publishJob.Step()
+        .Name("List files")
+        .Shell("bash")
+        .Run("tree");
+
+    publishJob.StepPushToNuget(pushAlways: true);
+
+    var fileName = $"{product.Name}-release";
+    WriteWorkflow(workflow, fileName);
+}
+
+void GenerateCodeQlWorkflow(Product system, string cronSchedule)
+{
+    var workflow = new Workflow($"{system.Name}/codeql");
+    var branches = new[] { "main" };
+    var paths = new[] { $"{system.Name}/**" };
+
+    workflow.On
+        .WorkflowDispatch();
+    workflow.On
+        .Push()
+        .Branches(branches)
+        .Paths(paths);
+    workflow.On
+        .PullRequest()
+        .Paths(paths);
+    workflow.On
+        .Schedule(cronSchedule);
+    
+    var job = workflow
+        .Job("analyze")
+        .Name("Analyze")
+        .RunsOn(GitHubHostedRunners.UbuntuLatest)
+        .Defaults().Run("bash", system.Name)
+        .Job;
+
+    job.Permissions(
+        actions: Permission.Read,
+        contents: Permission.Read,
+        securityEvents: Permission.Write);
+
+    job.Step()
+        .ActionsCheckout();
+    
+    job.StepInitializeCodeQl();
+    
+    job.StepSetupDotNet();
+
+    job.StepBuild(system.Solution);
+    
+    job.StepPerformCodeQlAnalysis();
+    
+    var fileName = $"{system.Name}-codeql-analysis";
+    WriteWorkflow(workflow, fileName);
+}
+
+void GenerateTemplatesReleaseWorkflow(Product product)
+{
+    var workflow = new Workflow($"{product.Name}/release");
+
+    workflow.On
+        .WorkflowDispatch()
+        .Inputs(new StringInput("version", "Version in format X.Y.Z or X.Y.Z-preview.", true, "0.0.0"));
+
+    workflow.EnvDefaults();
+
+    var job = workflow
+        .Job("tag")
+        .Name("Tag and Pack")
+        .RunsOn(GitHubHostedRunners.UbuntuLatest)
+        .Permissions(contents: Permission.Write, packages: Permission.Write)
+        .Defaults().Run("bash", product.Name).Job;
+
+    job.Step()
+        .ActionsCheckout();
+
+    job.StepSetupDotNet();
+
+    job.StepGitCheckoutCustomBranch();
+    job.StepGitConfig();
+    job.StepGitRemoveExistingTagIfConfigured(product, contexts);
+    job.StepGitPushTag(product, contexts);
+
+    job.Step()
+        .Name("build templates")
+        .Run("dotnet run --project build");
+
+    job.StepToolRestore();
+
+    job.StepSign(always: true);
+
+    job.StepPushToGithub(contexts, pushAlways: true);
+
+    job.StepUploadArtifacts(product.Name, uploadAlways: true);
+
+    var publishJob = workflow.Job("publish")
+        .Name("Publish to nuget.org")
+        .RunsOn(GitHubHostedRunners.UbuntuLatest)
+        .Needs("tag")
+        .Environment("nuget.org", "");
+
+    publishJob.Step()
+        .Uses("actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16") // 4.1.8
+        .With(("name", "artifacts"), ("path", "artifacts"));
+
+    publishJob.StepSetupDotNet();
+
+    publishJob.Step()
+        .Name("List files")
+        .Shell("bash")
+        .Run("tree");
+
+    publishJob.StepPushToNuget(pushAlways: true);
+
+    var fileName = $"{product.Name}-release";
     WriteWorkflow(workflow, fileName);
 }
 
@@ -167,7 +389,9 @@ void WriteWorkflow(Workflow workflow, string fileName)
     Console.WriteLine($"Wrote workflow to {filePath}");
 }
 
-record Component(string Name, string[] Projects, string[] Tests, string TagPrefix);
+record Product(string Name, string Solution, string TagPrefix)
+{
+}
 
 public static class StepExtensions
 {
@@ -184,7 +408,7 @@ public static class StepExtensions
     /// <summary>
     /// Only run this for a main build
     /// </summary>
-    public static Step IfRefMain(this Step step) 
+    public static Step IfRefMain(this Step step)
         => step.If("github.ref == 'refs/heads/main'");
 
     /// <summary>
@@ -194,43 +418,67 @@ public static class StepExtensions
     public static Step IfGithubEventIsPush(this Step step)
         => step.If("github.event == 'push'");
 
-    public static void StepTestAndReport(this Job job, string componentName, string testProject)
-    {
-        var path        = $"test/{testProject}";
-        var logFileName = "Tests.trx";
-        var flags = $"--logger \"console;verbosity=normal\" "      +
-                    $"--logger \"trx;LogFileName={logFileName}\" " +
-                    $"--collect:\"XPlat Code Coverage\"";
-        job.Step()
-            .Name($"Test - {testProject}")
-            .Run($"dotnet test -c Release {path} {flags}");
+    public static void StepDotNetDevCerts(this Job job)
+        => job.Step()
+            .Name("Dotnet devcerts")
+            .Run("dotnet dev-certs https --trust");
 
-        job.Step()
-            .Name($"Test report - {testProject}")
-            .Uses("dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5") // v1.9.1
-            .If("success() || failure()")
-            .With(
-                ("name", $"Test Report - {testProject}"),
-                ("path", $"{componentName}/{path}/TestResults/{logFileName}"),
-                ("reporter", "dotnet-trx"),
-                ("fail-on-error", "true"),
-                ("fail-on-empty", "true"));
-    }
+    public static void StepInstallPlayWright(this Job job)
+        => job.Step()
+            .Name("Install Playwright")
+            .Run("pwsh test/Hosts.Tests/bin/Release/net9.0/playwright.ps1 install --with-deps");
 
     public static void StepToolRestore(this Job job)
         => job.Step()
             .Name("Tool restore")
             .Run("dotnet tool restore");
 
-    public static void StepPack(this Job job, string project)
+    public static void StepPack(this Job job, string target)
     {
-        var path = $"src/{project}";
         job.Step()
-            .Name($"Pack {project}")
-            .Run($"dotnet pack -c Release {path} -o artifacts");
+            .Name($"Pack {target}")
+            .Run($"dotnet pack -c Release {target} -o artifacts");
     }
 
-    public static Step StepSign(this Job job)
+    public static Step StepBuild(this Job job, string solution)
+        => job.Step()
+            .Name("Build")
+            .Run($"dotnet build {solution} -c Release");
+
+    public static void StepTest(this Job job, string solution)
+    {
+        var logFileName = "Tests.trx";
+        var loggingFlags = $"--logger \"console;verbosity=normal\" " +
+                           $"--logger \"trx;LogFileName={logFileName}\" " +
+                           $"--collect:\"XPlat Code Coverage\"";
+
+        job.Step()
+            .Name("Test")
+            .Run($"dotnet test {solution} -c Release --no-build {loggingFlags}");
+
+        job.Step()
+            .Name("Test report")
+            .WorkingDirectory("test")
+            .Uses("dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5") // v1.9.1
+            .If("github.event == 'push' && (success() || failure())")
+            .With(
+                ("name", "Test Report"),
+                ("path", "**/Tests.trx"),
+                ("reporter", "dotnet-trx"),
+                ("fail-on-error", "true"),
+                ("fail-on-empty", "true"));
+    }
+
+    public static Step StepPushToNuget(this Job job, bool pushAlways = false)
+        => job.StepPush("nuget.org", "https://api.nuget.org/v3/index.json", "NUGET_ORG_API_KEY", pushAlways);
+
+    public static Step StepPushToGithub(this Job job, GitHubContexts contexts, bool pushAlways = false)
+        => job.StepPush("GitHub", "https://nuget.pkg.github.com/DuendeSoftware/index.json", "GITHUB_TOKEN", pushAlways)
+            .Env(("GITHUB_TOKEN", contexts.Secrets.GitHubToken),
+                ("NUGET_AUTH_TOKEN", contexts.Secrets.GitHubToken));
+
+
+    public static void StepSign(this Job job, bool always = false)
     {
         var flags = "--file-digest sha256 "                                                +
                     "--timestamp-rfc3161 http://timestamp.digicert.com "                   +
@@ -239,32 +487,108 @@ public static class StepExtensions
                     "--azure-key-vault-tenant-id ed3089f0-5401-4758-90eb-066124e2d907 "    +
                     "--azure-key-vault-client-secret ${{ secrets.SignClientSecret }} "     +
                     "--azure-key-vault-certificate NuGetPackageSigning";
+        var step = job.Step()
+            .Name("Sign packages");
+        if (!always)
+        {
+            step = step.IfGithubEventIsPush();
+        }
+        step.Run($"""
+                  for file in artifacts/*.nupkg; do
+                     dotnet NuGetKeyVaultSignTool sign "$file" {flags}
+                  done
+                  """);
+    }
+
+    public static Step StepPush(this Job job, string destination, string sourceUrl, string secretName, bool pushAlways = false)
+    {
+        var apiKey = $"${{{{ secrets.{secretName} }}}}";
+        var step = job.Step()
+            .Name($"Push packages to {destination}");
+
+        if (!pushAlways)
+        {
+            step.IfRefMain();
+        }
+        return step.Run($"dotnet nuget push artifacts/*.nupkg --source {sourceUrl} --api-key {apiKey} --skip-duplicate");
+    }
+
+    public static Step StepGitCheckoutCustomBranch(this Job job)
+    {
         return job.Step()
-            .Name("Sign packages")
-            .IfGithubEventIsPush()
+            .Name("Checkout target branch")
+            .If("github.event.inputs.branch != 'main'")
+            .Run("git checkout ${{ github.event.inputs.branch }}");
+    }
+
+    public static Step StepGitConfig(this Job job)
+    {
+        return job.Step()
+            .Name("Git Config")
+            .Run("""
+                 git config --global user.email "github-bot@duendesoftware.com"
+                 git config --global user.name "Duende Software GitHub Bot"
+                 """);
+    }
+    internal static Step StepGitRemoveExistingTagIfConfigured(this Job job, Product component, GitHubContexts contexts)
+    {
+        return job.Step()
+            .Name("Git Config")
+            .If("github.event.inputs['remove-tag-if-exists'] == 'true'")
             .Run($"""
-                 for file in artifacts/*.nupkg; do
-                    dotnet NuGetKeyVaultSignTool sign "$file" {flags}
-                 done
+                 if git rev-parse {component.TagPrefix}-{contexts.Event.Input.Version} >/dev/null 2>&1; then
+                   git tag -d {component.TagPrefix}-{contexts.Event.Input.Version}
+                   git push --delete origin {component.TagPrefix}-{contexts.Event.Input.Version}
+                 else
+                   echo 'Tag {component.TagPrefix}-{contexts.Event.Input.Version} does not exist.'
+                 fi
+                 """);
+    }
+    internal static Step StepGitPushTag(this Job job, Product component, GitHubContexts contexts)
+    {
+        return job.Step()
+            .Name("Git Config")
+            .Run($"""
+                 git tag -a {component.TagPrefix}-{contexts.Event.Input.Version} -m ""Release v{contexts.Event.Input.Version}""
+                 git push origin {component.TagPrefix}-{contexts.Event.Input.Version}
                  """);
     }
 
-    public static Step StepPush(this Job job, string destination, string sourceUrl, string secretName)
+    public static WorkflowDispatch InputVersionBranchAndTagOverride(this WorkflowDispatch workflow)
     {
-        var apiKey = $"${{{{ secrets.{secretName} }}}}";
-        return job.Step()
-            .Name($"Push packages to {destination}")
-            .IfRefMain()
-            .Run($"dotnet nuget push artifacts/*.nupkg --source {sourceUrl} --api-key {apiKey} --skip-duplicate");
+        return workflow.Inputs(
+            new StringInput("version", "Version in format X.Y.Z or X.Y.Z-preview.", true, "0.0.0"),
+            new StringInput("branch", "(Optional) the name of the branch to release from", false, "main"),
+            new BooleanInput("remove-tag-if-exists", "If set, will remove the existing tag. Use this if you have issues with the previous release action", false, false));
     }
 
-    public static Step StepUploadArtifacts(this Job job, string componentName)
+    public static Step StepUploadPlaywrightTestTraces(this Job job, string componentName)
+    {
+        var path = $"{componentName}/test/**/playwright-traces/*.zip";
+        return job.Step()
+            .Name("Upload playwright traces")
+            .If("success() || failure()")
+            .Uses("actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882") // 4.4.3
+            .With(
+                ("name", "playwright-traces"),
+                ("path", path),
+                ("overwrite", "true"),
+                ("retention-days", "15"));
+    }
+
+
+    public static void StepUploadArtifacts(this Job job, string componentName, bool uploadAlways = false)
     {
         var path = $"{componentName}/artifacts/*.nupkg";
-        return job.Step()
-            .Name("Upload Artifacts")
-            .IfRefMain()
-            .Uses("actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882") // 4.4.3
+        var step = job.Step()
+            .Name("Upload Artifacts");
+
+        if (!uploadAlways)
+        {
+            step.IfRefMain();
+        }
+
+        step.Uses("actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882") // 4.4.3
             .With(
                 ("name", "artifacts"),
                 ("path", path),
@@ -290,6 +614,25 @@ public static class StepExtensions
     public static Job RunEitherOnBranchOrAsPR(this Job job)
         => job.If(
             "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) || (github.event_name == 'push')");
+    
+    public static void StepInitializeCodeQl(this Job job)
+    {
+        job.Step()
+            .Name("Initialize CodeQL")
+            .Uses("github/codeql-action/init@9e8d0789d4a0fa9ceb6b1738f7e269594bdd67f0") // 3.28.9
+            .With(
+                ("languages", "csharp"),
+                ("build-mode", "manual"));
+    }
+    
+    public static void StepPerformCodeQlAnalysis(this Job job)
+    {
+        job.Step()
+            .Name("Perform CodeQL Analysis")
+            .Uses("github/codeql-action/analyze@9e8d0789d4a0fa9ceb6b1738f7e269594bdd67f0") // 3.28.9
+            .With(
+                ("category", "/language:csharp"));
+    }
 }
 
 public class GitHubContexts

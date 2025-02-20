@@ -8,7 +8,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Stores;
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace UnitTests.Extensions;
@@ -26,7 +26,8 @@ public class IResourceStoreExtensionsTests
         };
 
         Func<Task> a = () => store.GetAllEnabledResourcesAsync();
-        await a.Should().ThrowAsync<Exception>().WithMessage("duplicate identity scopes*");
+        var exception = await a.ShouldThrowAsync<Exception>();
+        exception.Message.ShouldMatch("Duplicate identity scopes*");
     }
 
     [Fact]
@@ -51,7 +52,8 @@ public class IResourceStoreExtensionsTests
         };
 
         Func<Task> a = () => store.GetAllEnabledResourcesAsync();
-        await a.Should().ThrowAsync<Exception>().WithMessage("duplicate api resources*");
+        var exception = await a.ShouldThrowAsync<Exception>();
+        exception.Message.ShouldMatch("Duplicate api resources*");
     }
 
     [Fact]
@@ -76,7 +78,8 @@ public class IResourceStoreExtensionsTests
         };
 
         Func<Task> a = () => store.FindResourcesByScopeAsync(new string[] { "A" });
-        await a.Should().ThrowAsync<Exception>().WithMessage("duplicate identity scopes*");
+        var exception = await a.ShouldThrowAsync<Exception>();
+        exception.Message.ShouldMatch("Duplicate identity scopes*");
     }
 
     [Fact]
@@ -107,10 +110,10 @@ public class IResourceStoreExtensionsTests
         };
 
         var result = await store.FindResourcesByScopeAsync(new string[] { "a" });
-        result.ApiResources.Count.Should().Be(2);
-        result.ApiScopes.Count.Should().Be(1);
-        result.ApiResources.Select(x => x.Name).Should().BeEquivalentTo(new[] { "api1", "api2" });
-        result.ApiScopes.Select(x => x.Name).Should().BeEquivalentTo(new[] { "a" });
+        result.ApiResources.Count.ShouldBe(2);
+        result.ApiScopes.Count.ShouldBe(1);
+        result.ApiResources.Select(x => x.Name).ShouldBe(["api1", "api2"]);
+        result.ApiScopes.Select(x => x.Name).ShouldBe(["a"]);
     }
 
     [Fact]
@@ -140,7 +143,7 @@ public class IResourceStoreExtensionsTests
         };
 
         var result = await store.FindResourcesByScopeAsync(new string[] { "a" });
-        result.ApiResources.Count.Should().Be(1);
+        result.ApiResources.Count.ShouldBe(1);
     }
 
     public class MockResourceStore : IResourceStore

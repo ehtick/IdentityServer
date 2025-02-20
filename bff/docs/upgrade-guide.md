@@ -99,3 +99,12 @@ a custom IAccessTokenRetriever, then you should adjust their usage accordingly.
     /// The remote address of the API.
     /// </summary>
     public required Uri ApiAddress { get; set; }
+
+### AddAddEntityFrameworkServerSideSessionsServices has been renamed to AddEntityFrameworkServerSideSessionsServices
+
+If you used the method AddAddEntityFrameworkServerSideSessionsServices() in your code, please replace it with the corrected AddEntityFrameworkServerSideSessionsServices()
+
+### StateProviderPollingDelay and StateProviderPollingInterval have been split into separate options for WebAssembly and Server. 
+
+If you used BffBlazorOptions.StateProviderPollingInterval or BffBlazorOptions.StateProviderPollingDelay to configure different polling settings, you should now consider if this same setting applies to either Server, WASM or both. Set the appropriate properties accordingly.
+

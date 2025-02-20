@@ -242,6 +242,12 @@ public class DefaultClientConfigurationValidator : IClientConfigurationValidator
                         return Task.CompletedTask;
                     }
                 }
+                
+                if (string.Equals(grantType, GrantType.ClientCredentials) && !context.Client.RequireClientSecret)
+                {
+                    context.SetError("RequireClientSecret is false, but client is using client credentials grant type.");
+                    return Task.CompletedTask;
+                }
             }
         }
 

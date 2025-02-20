@@ -1,9 +1,11 @@
-﻿using System;
+using System;
 using System.Reflection;
+using System.Runtime.Versioning;
 using Microsoft.Win32;
 
 namespace WindowsConsoleSystemBrowser
 {
+    [SupportedOSPlatform("Windows")]
     class RegistryConfig
     {
         public RegistryConfig(string uriScheme)

@@ -10,11 +10,7 @@ using Duende.IdentityModel;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 
 namespace Duende.IdentityServer.Stores;
 
@@ -26,6 +22,7 @@ public class ServerSideTicketStore : IServerSideTicketStore
     private readonly IdentityServerOptions _options;
     private readonly IIssuerNameService _issuerNameService;
     private readonly IServerSideSessionStore _store;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IDataProtector _protector;
     private readonly ILogger<ServerSideTicketStore> _logger;
 
@@ -36,17 +33,20 @@ public class ServerSideTicketStore : IServerSideTicketStore
     /// <param name="issuerNameService"></param>
     /// <param name="store"></param>
     /// <param name="dataProtectionProvider"></param>
+    /// <param name="httpContextAccessor"></param>
     /// <param name="logger"></param>
     public ServerSideTicketStore(
         IdentityServerOptions options,
         IIssuerNameService issuerNameService,
         IServerSideSessionStore store,
         IDataProtectionProvider dataProtectionProvider,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<ServerSideTicketStore> logger)
     {
         _options = options;
         _issuerNameService = issuerNameService;
         _store = store;
+        _httpContextAccessor = httpContextAccessor;
         _protector = dataProtectionProvider.CreateProtector("Duende.SessionManagement.ServerSideTicketStore");
         _logger = logger;
     }
@@ -160,15 +160,28 @@ public class ServerSideTicketStore : IServerSideTicketStore
     }
 
     /// <inheritdoc />
-    public Task RemoveAsync(string key)
+    public async Task RemoveAsync(string key)
     {
         using var activity = Tracing.StoreActivitySource.StartActivity("ServerSideTicketStore.Remove");
         
         ArgumentNullException.ThrowIfNull(key);
 
         _logger.LogDebug("Removing AuthenticationTicket from store for key {key}", key);
-
-        return _store.DeleteSessionAsync(key);
+        
+        // There is a somewhat rare scenario where a session has expired and a request to IdentityServer happens prior
+        // to the cleanup job running. When that happens, the session is removed but none of the processing to trigger
+        // backchannel logouts, etc. happens so we need a way to kick that off and are doing so here.
+        var session = await _store.GetSessionAsync(key);
+        if (session != null)
+        {
+            var userSession = AsUserSessions([session]).SingleOrDefault();
+            if (userSession != null)
+            {
+                _httpContextAccessor.HttpContext?.SetExpiredUserSession(userSession);
+            }
+        }
+        
+        await _store.DeleteSessionAsync(key);
     }
 
     /// <inheritdoc/>

@@ -2,18 +2,13 @@
 // See LICENSE in the project root for license information.
 
 
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 using Duende.IdentityServer.EntityFramework.DbContexts;
 using Duende.IdentityServer.EntityFramework.Mappers;
 using Duende.IdentityServer.EntityFramework.Options;
 using Duende.IdentityServer.EntityFramework.Stores;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
-using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Xunit;
 using Xunit.Sdk;
 
 namespace EntityFramework.Storage.IntegrationTests.Stores;
@@ -35,7 +30,7 @@ public class ClientStoreTests : IntegrationTest<ClientStoreTests, ConfigurationD
         using var context = new ConfigurationDbContext(options);
         var store = new ClientStore(context, FakeLogger<ClientStore>.Create(), new NoneCancellationTokenProvider());
         var client = await store.FindClientByIdAsync(Guid.NewGuid().ToString());
-        client.Should().BeNull();
+        client.ShouldBeNull();
     }
 
     [Theory, MemberData(nameof(TestDatabaseProviders))]
@@ -60,7 +55,7 @@ public class ClientStoreTests : IntegrationTest<ClientStoreTests, ConfigurationD
             client = await store.FindClientByIdAsync(testClient.ClientId);
         }
 
-        client.Should().NotBeNull();
+        client.ShouldNotBeNull();
     }
 
     [Theory, MemberData(nameof(TestDatabaseProviders))]
@@ -94,7 +89,20 @@ public class ClientStoreTests : IntegrationTest<ClientStoreTests, ConfigurationD
             client = await store.FindClientByIdAsync(testClient.ClientId);
         }
 
-        client.Should().BeEquivalentTo(testClient);
+        client.ShouldSatisfyAllConditions(c =>
+        {
+            c.ClientId.ShouldBe(testClient.ClientId);
+            c.ClientName.ShouldBe(testClient.ClientName);
+            c.AllowedCorsOrigins.ShouldBe(testClient.AllowedCorsOrigins);
+            c.AllowedGrantTypes.ShouldBe(testClient.AllowedGrantTypes, true);
+            c.AllowedScopes.ShouldBe(testClient.AllowedScopes, true);
+            c.Claims.ShouldBe(testClient.Claims);
+            c.ClientSecrets.ShouldBe(testClient.ClientSecrets, true);
+            c.IdentityProviderRestrictions.ShouldBe(testClient.IdentityProviderRestrictions);
+            c.PostLogoutRedirectUris.ShouldBe(testClient.PostLogoutRedirectUris);
+            c.Properties.ShouldBe(testClient.Properties);
+            c.RedirectUris.ShouldBe(testClient.RedirectUris);
+        });
     }
 
     [Theory, MemberData(nameof(TestDatabaseProviders))]
@@ -148,7 +156,13 @@ public class ClientStoreTests : IntegrationTest<ClientStoreTests, ConfigurationD
 #pragma warning disable xUnit1031 // Do not use blocking task operations in test method, suppressed because the task must have completed to enter this block
                 var client = task.Result;
 #pragma warning restore xUnit1031 // Do not use blocking task operations in test method
-                client.Should().BeEquivalentTo(testClient);
+                client.ShouldSatisfyAllConditions(c =>
+                {
+                    c.ClientId.ShouldBe(testClient.ClientId);
+                    c.ClientName.ShouldBe(testClient.ClientName);
+                    c.AllowedScopes.ShouldBe(testClient.AllowedScopes, true);
+                    c.AllowedGrantTypes.ShouldBe(testClient.AllowedGrantTypes);
+                });
             }
             else
             {

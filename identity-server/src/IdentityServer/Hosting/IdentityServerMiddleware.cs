@@ -83,6 +83,13 @@ public class IdentityServerMiddleware
                     await sessionCoordinationService.ProcessLogoutAsync(session);
                 }
             }
+
+            if (context.TryGetExpiredUserSession(out var expiredUserSession))
+            {
+                _logger.LogDebug("Detected expired session removed; processing post-expiration cleanup.");
+                
+                await sessionCoordinationService.ProcessExpirationAsync(expiredUserSession);
+            }
         });
 
         try
