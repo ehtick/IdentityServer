@@ -3,6 +3,7 @@
 
 using Duende.AccessTokenManagement.DPoP;
 using Duende.Bff.Configuration;
+using Duende.Bff.Yarp.Internal;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,7 @@ public static class YarpTransformExtensions
     /// </summary>
     public static TransformBuilderContext AddBffAccessToken(this TransformBuilderContext context, PathString localPath)
     {
+        ArgumentNullException.ThrowIfNull(context);
         var proofService = context.Services.GetRequiredService<IDPoPProofService>();
 
         var logger = context.Services.GetRequiredService<ILogger<AccessTokenRequestTransform>>();

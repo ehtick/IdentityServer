@@ -13,16 +13,6 @@ public static class Constants
         internal const string AntiForgeryMarker = "Duende.Bff.AntiForgery";
     }
 
-    internal static class AspnetCorePipeline
-    {
-        public const string AntiForgeryAdded = "Duende.Bff.AntiForgery.AddedToMiddleware";
-        public const string FrontendSelectionAdded = "Duende.Bff.FrontendSelection.AddedToMiddleware";
-        public const string PathMappingAdded = "Duende.Bff.PathMapping.AddedToMiddleware";
-        public const string OpenIdCallbacksAdded = "Duende.Bff.OpenIdCallbacks.AddedToMiddleware";
-        public const string RemoteRoutesAdded = "Duende.Bff.RemoteRoutes.AddedToMiddleware";
-        public const string BffIndexPagesAdded = "Duende.Bff.BffIndexPages.AddedToMiddleware";
-    }
-
     /// <summary>
     /// Constants used for YARP
     /// </summary>
@@ -39,7 +29,9 @@ public static class Constants
         public const string AntiforgeryCheckMetadata = "Duende.Bff.Yarp.AntiforgeryCheck";
     }
 
+#pragma warning disable CA1724 // CA1724: Type names should not match namespaces
     public static class Cookies
+#pragma warning restore CA1724
     {
         public const string HostPrefix = "__Host";
         public const string SecurePrefix = "__Secure";
@@ -107,8 +99,6 @@ public static class Constants
         /// Diagnostics path
         /// </summary>
         public const string Diagnostics = "/diagnostics";
-
-        public const string SigninUrl = "/bff-signin";
     }
 
     /// <summary>
@@ -141,7 +131,7 @@ public static class Constants
         public const string Prompt = "bff-prompt";
     }
 
-    public class HttpClientNames
+    public static class HttpClientNames
     {
         public const string IndexHtmlHttpClient = "Duende.Bff.IndexHtmlClient";
 

@@ -126,7 +126,7 @@ public sealed class BffOptions
     /// The ASP.NET environment names that enable the diagnostics endpoint.
     /// Defaults to "Development".
     /// </summary>
-    public ICollection<string> DiagnosticsEnvironments { get; set; } = new HashSet<string>()
+    public ICollection<string> DiagnosticsEnvironments { get; } = new HashSet<string>()
     {
         Environments.Development
     };
@@ -161,4 +161,6 @@ public sealed class BffOptions
     /// Indicates if we should automatically register the BFF middleware in the pipeline.
     /// </summary>
     public bool AutomaticallyRegisterBffMiddleware { get; set; } = true;
+
+    internal List<LoadPluginMiddlewares> MiddlewareLoaders { get; set; } = [];
 }
