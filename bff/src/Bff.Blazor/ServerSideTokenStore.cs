@@ -21,6 +21,7 @@ internal class ServerSideTokenStore(
     IStoreTokensInAuthenticationProperties tokensInAuthProperties,
     IUserSessionStore sessionStore,
     IDataProtectionProvider dataProtectionProvider,
+    BuildUserSessionPartitionKey userSessionPartitionKeyBuilder,
     ILogger<ServerSideTokenStore> logger,
     AuthenticationStateProvider authenticationStateProvider) : IUserTokenStore
 {
@@ -33,7 +34,7 @@ internal class ServerSideTokenStore(
     public async Task<TokenResult<TokenForParameters>> GetTokenAsync(ClaimsPrincipal user, UserTokenRequestParameters? parameters = null,
         CancellationToken ct = default)
     {
-        logger.RetrievingTokenForUser(user.Identity?.Name);
+        logger.RetrievingTokenForUser(LogLevel.Debug, user.Identity?.Name);
         var session = await GetSession(user);
         if (session == null)
         {
@@ -58,13 +59,15 @@ internal class ServerSideTokenStore(
         var sub = user.FindFirst("sub")?.Value ?? throw new InvalidOperationException("no sub claim");
         var sid = user.FindFirst("sid")?.Value ?? throw new InvalidOperationException("no sid claim");
 
-        logger.RetrievingSession(sid, sub);
+        logger.RetrievingSession(LogLevel.Debug, sid, sub);
 
-        var sessions = await sessionStore.GetUserSessionsAsync(new UserSessionsFilter
+        var userSessionsFilter = new UserSessionsFilter
         {
             SubjectId = sub,
             SessionId = sid
-        });
+        };
+        var partitionKey = userSessionPartitionKeyBuilder();
+        var sessions = await sessionStore.GetUserSessionsAsync(partitionKey, userSessionsFilter);
 
         if (sessions.Count == 0)
         {
@@ -82,7 +85,7 @@ internal class ServerSideTokenStore(
     public async Task StoreTokenAsync(ClaimsPrincipal user, UserToken token,
         UserTokenRequestParameters? parameters = null, CT ct = default)
     {
-        logger.StoringTokenForUser(user.Identity?.Name);
+        logger.StoringTokenForUser(LogLevel.Debug, user.Identity?.Name);
         await UpdateTicket(user,
             async ticket => { await tokensInAuthProperties.SetUserTokenAsync(token, ticket.Properties, parameters, ct); });
     }
@@ -90,7 +93,7 @@ internal class ServerSideTokenStore(
 
     public async Task ClearTokenAsync(ClaimsPrincipal user, UserTokenRequestParameters? parameters = null, CT ct = default)
     {
-        logger.RemovingTokenForUser(user.Identity?.Name);
+        logger.RemovingTokenForUser(LogLevel.Debug, user.Identity?.Name);
         await UpdateTicket(user, ticket =>
         {
             tokensInAuthProperties.RemoveUserToken(ticket.Properties, parameters);
@@ -103,7 +106,7 @@ internal class ServerSideTokenStore(
         var session = await GetSession(user);
         if (session == null)
         {
-            logger.FailedToFindSessionToUpdate();
+            logger.FailedToFindSessionToUpdate(LogLevel.Debug);
             return;
         }
 
@@ -114,6 +117,6 @@ internal class ServerSideTokenStore(
 
         session.Ticket = ticket.Serialize(_protector);
 
-        await sessionStore.UpdateUserSessionAsync(session.Key, session);
+        await sessionStore.UpdateUserSessionAsync(session.GetUserSessionKey(), session);
     }
 }

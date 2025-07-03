@@ -226,8 +226,8 @@ public class IdentityServerOptions
     /// request_object_signing_alg_values_supported discovery property is populated with these values.
     /// </para>
     /// <para>
-    /// Defaults to [RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, ES512, HS256, HS384, HS512], which allows
-    /// the RSA, Probabilistic RSA, ECDSA, or HMAC signing algorithms with 256, 384, or 512-bit SHA hashing.
+    /// Defaults to [RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, ES512], which allows
+    /// the RSA, Probabilistic RSA, or ECDSA signing algorithms with 256, 384, or 512-bit SHA hashing.
     /// </para>
     /// <para>
     /// If set to an empty collection, all algorithms are allowed, but the request_object_signing_alg_values_supported
@@ -247,10 +247,6 @@ public class IdentityServerOptions
         SecurityAlgorithms.EcdsaSha256,
         SecurityAlgorithms.EcdsaSha384,
         SecurityAlgorithms.EcdsaSha512,
-
-        SecurityAlgorithms.HmacSha256,
-        SecurityAlgorithms.HmacSha384,
-        SecurityAlgorithms.HmacSha512
     ];
 
     /// <summary>
@@ -260,8 +256,8 @@ public class IdentityServerOptions
     /// token_endpoint_auth_signing_alg_values_supported discovery property is populated with these values.
     /// </para>
     /// <para>
-    /// Defaults to [RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, ES512, HS256, HS384, HS512], which allows
-    /// the RSA, Probabilistic RSA, ECDSA, or HMAC signing algorithms with 256, 384, or 512-bit SHA hashing.
+    /// Defaults to [RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, ES512], which allows
+    /// the RSA, Probabilistic RSA, or ECDSA signing algorithms with 256, 384, or 512-bit SHA hashing.
     /// </para>
     /// <para>
     /// If set to an empty collection, all algorithms are allowed, but the
@@ -281,10 +277,6 @@ public class IdentityServerOptions
         SecurityAlgorithms.EcdsaSha256,
         SecurityAlgorithms.EcdsaSha384,
         SecurityAlgorithms.EcdsaSha512,
-
-        SecurityAlgorithms.HmacSha256,
-        SecurityAlgorithms.HmacSha384,
-        SecurityAlgorithms.HmacSha512
     ];
 
     /// <summary>
@@ -298,8 +290,7 @@ public class IdentityServerOptions
     public PreviewFeatureOptions Preview { get; set; } = new PreviewFeatureOptions();
 
     /// <summary>
-    /// Frequency at which the diagnostic summary is logged.
-    /// The default value is 1 hour.
+    /// Options that control the diagnostic data that is logged by IdentityServer.
     /// </summary>
-    public TimeSpan DiagnosticSummaryLogFrequency { get; set; } = TimeSpan.FromHours(1);
+    public DiagnosticOptions Diagnostics { get; set; } = new DiagnosticOptions();
 }

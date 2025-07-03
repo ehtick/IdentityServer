@@ -1,7 +1,9 @@
 // Copyright (c) Duende Software. All rights reserved.
 // See LICENSE in the project root for license information.
 
+using System.Security.Claims;
 using Duende.Bff.DynamicFrontends;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Xunit.Abstractions;
 
@@ -38,12 +40,83 @@ public abstract class BffTestBase : IAsyncDisposable
 
 
         Api = new ApiHost(Context, IdentityServer);
-        Bff = new BffTestHost(Context);
+        Bff = new BffTestHost(Context, IdentityServer);
         Cdn = new CdnHost(Context);
         IdentityServer.AddClient(DefaultOidcClient.ClientId, Bff.Url());
         Some = Context.Some;
     }
 
+    protected virtual async Task ConfigureBff(
+        BffSetupType setup,
+        Action<CookieAuthenticationOptions>? configureCookie = null,
+        Action<OpenIdConnectOptions>? configureOpenIdConnect = null)
+    {
+        // This method is used to configure the BFF in different ways depending on the setup type.
+        Action<OpenIdConnectOptions> openIdConfiguration = opt =>
+        {
+            (configureOpenIdConnect ?? The.DefaultOpenIdConnectConfiguration).Invoke(opt);
+
+            if (_customUserClaims.Any())
+            {
+                AddCustomUserClaims(opt);
+            }
+        };
+
+
+        if (setup == BffSetupType.BffWithFrontend)
+        {
+            // We're using a frontend to configure the BFF
+            // This automatically adds the middleware needed to configure BFF
+            CurrentFrontend = Some.BffFrontend() with
+            {
+                ConfigureCookieOptions = options =>
+                {
+                    configureCookie?.Invoke(options);
+                },
+                ConfigureOpenIdConnectOptions = openIdConfiguration
+            };
+            AddOrUpdateFrontend(CurrentFrontend);
+        }
+        else if (setup == BffSetupType.V4Bff)
+        {
+            IdentityServer.AddClient(The.ClientId, Bff.Url());
+            Bff.OnConfigureBff += bff =>
+            {
+                bff.WithDefaultOpenIdConnectOptions(openIdConfiguration);
+                bff.WithDefaultCookieOptions(options =>
+                {
+                    configureCookie?.Invoke(options);
+                });
+            };
+        }
+        else if (setup == BffSetupType.ManuallyConfiguredBff)
+        {
+            // Old style setup. Explicitly configuring the authentication including cookie, and openid connect
+            IdentityServer.AddClient(The.ClientId, Bff.Url());
+
+            Bff.OnConfigureServices += services =>
+            {
+                services.AddAuthentication(options =>
+                    {
+                        options.DefaultScheme = "cookie";
+                        options.DefaultChallengeScheme = "oidc";
+                        options.DefaultSignOutScheme = "oidc";
+                    })
+                    .AddCookie("cookie", options =>
+                    {
+                        configureCookie?.Invoke(options);
+                    })
+                    .AddOpenIdConnect("oidc", openIdConfiguration);
+            };
+        }
+        else
+        {
+            throw new ArgumentOutOfRangeException(nameof(setup), setup, null);
+
+        }
+
+        await InitializeAsync();
+    }
 
     protected virtual void Initialize()
     {
@@ -115,6 +188,62 @@ public abstract class BffTestBase : IAsyncDisposable
         }
 
         Bff.AddOrUpdateFrontend(frontend);
-        IdentityServer.AddClientFor(frontend, Bff.Url());
+        List<Uri> baseUris = [Bff.Url()];
+        if (frontend.SelectionCriteria.MatchingOrigin != null)
+        {
+            baseUris.Add(frontend.SelectionCriteria.MatchingOrigin.ToUri());
+        }
+        IdentityServer.AddClientFor(frontend, baseUris);
     }
+
+
+    public enum BffSetupType
+    {
+        /// <summary>
+        /// The BFF is configured manually (V3 style)
+        /// </summary>
+        ManuallyConfiguredBff,
+
+        /// <summary>
+        /// The BFF is configured using a frontend (V4 style).
+        /// </summary>
+        BffWithFrontend,
+
+        /// <summary>
+        /// The BFF is configured using v4 style setup
+        /// </summary>
+        V4Bff
+    }
+
+    /// <summary>
+    /// There are multiple ways to configure the BFF that should be functionally identical. 
+    /// </summary>
+    /// <returns></returns>
+    public static IEnumerable<object[]> AllSetups()
+    {
+        yield return [BffSetupType.BffWithFrontend];
+        yield return [BffSetupType.ManuallyConfiguredBff];
+        yield return [BffSetupType.V4Bff];
+    }
+
+    private List<Claim> _customUserClaims = [];
+    public BffFrontend? CurrentFrontend;
+
+    protected void AddCustomUserClaims(params Claim[] claims) => _customUserClaims.AddRange(claims);
+
+    private void AddCustomUserClaims(OpenIdConnectOptions opt) =>
+        opt.Events.OnTokenValidated = context =>
+        {
+            // Add custom claims to the identity
+            var identity = (ClaimsIdentity)context.Principal!.Identity!;
+            foreach (var claim in _customUserClaims)
+            {
+                identity.AddClaim(claim);
+            }
+
+            return Task.CompletedTask;
+        };
+
+    protected void AdvanceClock(TimeSpan by) => The.Clock.SetUtcNow(The.Clock.GetUtcNow().Add(by));
 }
+

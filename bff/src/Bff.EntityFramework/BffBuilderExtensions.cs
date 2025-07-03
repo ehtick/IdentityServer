@@ -1,6 +1,7 @@
 // Copyright (c) Duende Software. All rights reserved.
 // See LICENSE in the project root for license information.
 
+using Duende.Bff.EntityFramework.Internal;
 using Duende.Bff.SessionManagement.SessionStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,6 +38,7 @@ public static class BffBuilderExtensions
     public static BffBuilder AddEntityFrameworkServerSideSessions<TContext>(this BffBuilder bffBuilder, Action<IServiceProvider, DbContextOptionsBuilder> action)
         where TContext : DbContext, ISessionDbContext
     {
+        ArgumentNullException.ThrowIfNull(bffBuilder);
         bffBuilder.Services.AddDbContext<TContext>(action);
         return bffBuilder.AddEntityFrameworkServerSideSessionsServices<TContext>();
     }
@@ -50,6 +52,7 @@ public static class BffBuilderExtensions
     public static BffBuilder AddEntityFrameworkServerSideSessions<TContext>(this BffBuilder bffBuilder, Action<DbContextOptionsBuilder> action)
         where TContext : DbContext, ISessionDbContext
     {
+        ArgumentNullException.ThrowIfNull(bffBuilder);
         bffBuilder.Services.AddDbContext<TContext>(action);
         return bffBuilder.AddEntityFrameworkServerSideSessionsServices<TContext>();
     }
@@ -64,6 +67,7 @@ public static class BffBuilderExtensions
     public static BffBuilder AddEntityFrameworkServerSideSessionsServices<TContext>(this BffBuilder bffBuilder)
         where TContext : ISessionDbContext
     {
+        ArgumentNullException.ThrowIfNull(bffBuilder);
         bffBuilder.Services.AddTransient<IUserSessionStoreCleanup, UserSessionStore>();
         bffBuilder.Services.AddTransient<ISessionDbContext>(svcs => svcs.GetRequiredService<TContext>());
         return bffBuilder.AddServerSideSessions<UserSessionStore>();
@@ -74,6 +78,7 @@ public static class BffBuilderExtensions
     /// </summary>
     public static BffBuilder ConfigureEntityFrameworkSessionStoreOptions(this BffBuilder bffBuilder, Action<SessionStoreOptions> action)
     {
+        ArgumentNullException.ThrowIfNull(bffBuilder);
         bffBuilder.Services.Configure(action);
         return bffBuilder;
     }

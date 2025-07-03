@@ -9,6 +9,7 @@ using Duende.IdentityServer.Configuration;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Licensing.V2;
+using Duende.IdentityServer.Licensing.V2.Diagnostics;
 using Duende.IdentityServer.Logging.Models;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
@@ -37,6 +38,9 @@ internal class TokenRequestValidator : ITokenRequestValidator
     private readonly IBackchannelAuthenticationRequestIdValidator _backchannelAuthenticationRequestIdValidator;
     private readonly IClock _clock;
     private readonly LicenseUsageTracker _licenseUsage;
+    private readonly ClientLoadedTracker _clientLoadedTracker;
+    private readonly ResourceLoadedTracker _resourceLoadedTracker;
+    private readonly IMtlsEndpointGenerator _mtlsEndpointGenerator;
     private readonly ILogger _logger;
 
     private ValidatedTokenRequest _validatedRequest;
@@ -59,6 +63,9 @@ internal class TokenRequestValidator : ITokenRequestValidator
         IEventService events,
         IClock clock,
         LicenseUsageTracker licenseUsage,
+        ClientLoadedTracker clientLoadedTracker,
+        ResourceLoadedTracker resourceLoadedTracker,
+        IMtlsEndpointGenerator mtlsEndpointGenerator,
         ILogger<TokenRequestValidator> logger)
     {
         _logger = logger;
@@ -79,6 +86,9 @@ internal class TokenRequestValidator : ITokenRequestValidator
         _refreshTokenService = refreshTokenService;
         _dPoPProofValidator = dPoPProofValidator;
         _events = events;
+        _clientLoadedTracker = clientLoadedTracker;
+        _resourceLoadedTracker = resourceLoadedTracker;
+        _mtlsEndpointGenerator = mtlsEndpointGenerator;
     }
 
     // only here for legacy unit tests
@@ -209,15 +219,15 @@ internal class TokenRequestValidator : ITokenRequestValidator
 
     private async Task<TokenRequestValidationResult> ValidateProofToken(TokenRequestValidationContext context)
     {
-        // can't allow both both at once
-        if (context.ClientCertificate != null && context.DPoPProofToken.IsPresent())
-        {
-            LogError("Only one confirmation mechanism is allowed at a time.");
-            return Invalid(OidcConstants.TokenErrors.InvalidRequest, "Only one confirmation mechanism is allowed at a time");
-        }
 
         // mTLS client cert processing
-        if (context.ClientCertificate != null)
+        //
+        // If both a dpop proof and client certificate are present, we use the
+        // proof token for sender-constraining the token. DPoP takes precedence
+        // because that's the only sensible interpretation of the client's
+        // request. DPoP can only be used for sender constraining the token,
+        // but client certificates can also be used as client authentication.
+        if (context.ClientCertificate != null && context.DPoPProofToken.IsMissing())
         {
             if (_options.MutualTls.AlwaysEmitConfirmationClaim && _validatedRequest.Confirmation.IsMissing())
             {
@@ -241,7 +251,7 @@ internal class TokenRequestValidator : ITokenRequestValidator
                 return Invalid(OidcConstants.TokenErrors.InvalidDPoPProof);
             }
 
-            var tokenUrl = _serverUrls.BaseUrl.EnsureTrailingSlash() + ProtocolRoutePaths.Token;
+            var tokenUrl = context.ClientCertificate == null ? _serverUrls.BaseUrl.EnsureTrailingSlash() + ProtocolRoutePaths.Token : _mtlsEndpointGenerator.GetMtlsEndpointPath(ProtocolRoutePaths.Token);
             var dpopContext = new DPoPProofValidatonContext
             {
                 ExpirationValidationMode = _validatedRequest.Client.DPoPValidationMode,
@@ -305,7 +315,9 @@ internal class TokenRequestValidator : ITokenRequestValidator
 
         var clientId = customValidationContext.Result.ValidatedRequest.ClientId;
         _licenseUsage.ClientUsed(clientId);
+        _clientLoadedTracker.TrackClientLoaded(customValidationContext.Result.ValidatedRequest.Client);
         IdentityServerLicenseValidator.Instance.ValidateClient(clientId);
+        _resourceLoadedTracker.TrackResources(customValidationContext.Result.ValidatedRequest.ValidatedResources.Resources);
 
         return customValidationContext.Result;
     }
@@ -443,7 +455,7 @@ internal class TokenRequestValidator : ITokenRequestValidator
         }
 
         //////////////////////////////////////////////////////////
-        // resource and scope validation 
+        // resource and scope validation
         //////////////////////////////////////////////////////////
         var validatedResources = await _resourceValidator.ValidateRequestedResourcesAsync(new ResourceValidationRequest
         {
@@ -791,7 +803,7 @@ internal class TokenRequestValidator : ITokenRequestValidator
         }
 
         //////////////////////////////////////////////////////////
-        // resource and scope validation 
+        // resource and scope validation
         //////////////////////////////////////////////////////////
         var validatedResources = await _resourceValidator.ValidateRequestedResourcesAsync(new ResourceValidationRequest
         {
@@ -873,7 +885,7 @@ internal class TokenRequestValidator : ITokenRequestValidator
         }
 
         //////////////////////////////////////////////////////////
-        // scope validation 
+        // scope validation
         //////////////////////////////////////////////////////////
         var validatedResources = await _resourceValidator.ValidateRequestedResourcesAsync(new ResourceValidationRequest
         {
@@ -962,7 +974,7 @@ internal class TokenRequestValidator : ITokenRequestValidator
         }
 
         //////////////////////////////////////////////////////////
-        // resource and scope validation 
+        // resource and scope validation
         //////////////////////////////////////////////////////////
         var validatedResources = await _resourceValidator.ValidateRequestedResourcesAsync(new ResourceValidationRequest
         {

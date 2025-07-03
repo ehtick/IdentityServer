@@ -8,7 +8,6 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
-using Serilog.Events;
 
 namespace IdentityServerHost;
 
@@ -29,28 +28,6 @@ internal static class HostingExtensions
         builder.ConfigureIdentityServer();
         builder.AddExternalIdentityProviders();
 
-        // var apiKey = builder.Configuration["HoneyCombApiKey"];
-        // var dataset = "IdentityServerDev";
-        //
-        // builder.Services.AddOpenTelemetryTracing(builder =>
-        // {
-        //     builder
-        //         //.AddConsoleExporter()
-        //         .AddSource(IdentityServerConstants.Tracing.ServiceName)
-        //         .SetResourceBuilder(
-        //             ResourceBuilder.CreateDefault()
-        //                 .AddService("IdentityServerHost.AspId"))
-        //         //.SetSampler(new AlwaysOnSampler())
-        //         .AddHttpClientInstrumentation()
-        //         .AddAspNetCoreInstrumentation()
-        //         .AddSqlClientInstrumentation()
-        //         .AddOtlpExporter(option =>
-        //         {
-        //             option.Endpoint = new Uri("https://api.honeycomb.io");
-        //             option.Headers = $"x-honeycomb-team={apiKey},x-honeycomb-dataset={dataset}";
-        //         });
-        // });
-
         return builder.Build();
     }
 
@@ -63,7 +40,7 @@ internal static class HostingExtensions
             .AddOpenIdConnect("Google", "Google", options =>
             {
                 options.SignInScheme = IdentityServerConstants.ExternalCookieAuthenticationScheme;
-                options.ForwardSignOut = IdentityServerConstants.DefaultCookieAuthenticationScheme;
+                options.ForwardSignOut = IdentityConstants.ApplicationScheme;
 
                 options.Authority = "https://accounts.google.com/";
                 options.ClientId = "708996912208-9m4dkjb5hscn7cjrn5u0r4tbgkbj1fko.apps.googleusercontent.com";
@@ -75,7 +52,7 @@ internal static class HostingExtensions
             .AddOpenIdConnect("demoidsrv", "IdentityServer", options =>
             {
                 options.SignInScheme = IdentityServerConstants.ExternalCookieAuthenticationScheme;
-                options.SignOutScheme = IdentityServerConstants.SignoutScheme;
+                options.SignOutScheme = IdentityConstants.ApplicationScheme;
 
                 options.Authority = "https://demo.duendesoftware.com";
                 options.ClientId = "login";
@@ -95,7 +72,7 @@ internal static class HostingExtensions
             .AddOpenIdConnect("aad", "Azure AD", options =>
             {
                 options.SignInScheme = IdentityServerConstants.ExternalCookieAuthenticationScheme;
-                options.SignOutScheme = IdentityServerConstants.SignoutScheme;
+                options.SignOutScheme = IdentityConstants.ApplicationScheme;
 
                 options.Authority = "https://login.windows.net/4ca9cb4c-5e5f-4be9-b700-c532992a3705";
                 options.ClientId = "96e3c53e-01cb-4244-b658-a42164cb67a9";
@@ -116,8 +93,7 @@ internal static class HostingExtensions
 
     internal static WebApplication ConfigurePipeline(this WebApplication app)
     {
-        app.UseSerilogRequestLogging(
-            options => options.GetLevel = (httpContext, elapsed, ex) => LogEventLevel.Debug);
+        app.UseSerilogRequestLogging();
 
         app.UseDeveloperExceptionPage();
         app.UseStaticFiles();
@@ -125,6 +101,9 @@ internal static class HostingExtensions
         app.UseRouting();
         app.UseIdentityServer();
         app.UseAuthorization();
+
+        // health checks
+        app.MapHealthChecks("/health");
 
         // UI
         app.MapRazorPages()

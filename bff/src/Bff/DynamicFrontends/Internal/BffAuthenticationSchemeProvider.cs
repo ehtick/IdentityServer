@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace Duende.Bff.DynamicFrontends.Internal;
 
 internal class BffAuthenticationSchemeProvider(
-    SelectedFrontend selectedFrontend,
+    CurrentFrontendAccessor currentFrontendAccessor,
     IOptions<AuthenticationOptions> options,
     IOptions<BffOptions> bffOptions) : AuthenticationSchemeProvider(options)
 {
@@ -19,7 +19,7 @@ internal class BffAuthenticationSchemeProvider(
     {
         var defaultSchemes = await base.GetRequestHandlerSchemesAsync();
 
-        if (!selectedFrontend.TryGet(out _) && bffOptions.Value.ConfigureOpenIdConnectDefaults != null)
+        if (!currentFrontendAccessor.TryGet(out _) && bffOptions.Value.ConfigureOpenIdConnectDefaults != null)
         {
             defaultSchemes = defaultSchemes.Append(new BffAuthenticationScheme(BffAuthenticationSchemes.BffOpenIdConnect, "Default Duende Bff OpenIdConnect", typeof(OpenIdConnectHandler)));
         }
@@ -34,13 +34,13 @@ internal class BffAuthenticationSchemeProvider(
         return scheme ?? GetBffAuthenticationScheme(name);
     }
 
-    private AuthenticationScheme? GetBffAuthenticationScheme(string name)
+    private BffAuthenticationScheme? GetBffAuthenticationScheme(string name)
     {
-        selectedFrontend.TryGet(out var frontend);
+        currentFrontendAccessor.TryGet(out var frontend);
 
-        if (name == frontend?.CookieSchemeName || name == BffAuthenticationSchemes.BffDefault)
+        if (name == frontend?.CookieSchemeName || name == BffAuthenticationSchemes.BffCookie)
         {
-            return new BffAuthenticationScheme(frontend?.CookieSchemeName ?? BffAuthenticationSchemes.BffDefault, "Duende Bff Cookie", typeof(CookieAuthenticationHandler));
+            return new BffAuthenticationScheme(frontend?.CookieSchemeName ?? BffAuthenticationSchemes.BffCookie, "Duende Bff Cookie", typeof(CookieAuthenticationHandler));
         }
 
         if (name == frontend?.OidcSchemeName || name == BffAuthenticationSchemes.BffOpenIdConnect)

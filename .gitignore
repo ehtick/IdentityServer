@@ -225,3 +225,7 @@ artifacts
 
 #exclude for verify.tests
 *.received.txt
+
+*.Artifacts/
+
+reports

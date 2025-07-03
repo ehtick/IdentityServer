@@ -14,9 +14,4 @@ public class UserSessionEntity : UserSession
     /// Id for record in database
     /// </summary>
     public long Id { get; set; }
-
-    /// <summary>
-    /// Discriminator to allow multiple applications to share the user session table.
-    /// </summary>
-    public string? ApplicationName { get; set; }
 }

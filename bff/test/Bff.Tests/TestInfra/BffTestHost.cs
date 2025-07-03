@@ -1,17 +1,21 @@
 // Copyright (c) Duende Software. All rights reserved.
 // See LICENSE in the project root for license information.
 
+using System.Net;
 using Duende.Bff.Configuration;
 using Duende.Bff.DynamicFrontends;
 using Duende.Bff.DynamicFrontends.Internal;
+using Microsoft.Extensions.Options;
 using Yarp.ReverseProxy.Forwarder;
 
 namespace Duende.Bff.Tests.TestInfra;
 
-public class BffTestHost(TestHostContext context) : TestHost(context, new Uri("https://bff"))
+public class BffTestHost(TestHostContext context, IdentityServerTestHost identityServer)
+    : TestHost(context, new Uri("https://bff"))
 {
     public readonly string DefaultRootResponse = "Default response from root";
     private BffHttpClient _browserClient = null!;
+    public BffOptions BffOptions => Resolve<IOptions<BffOptions>>().Value;
 
     /// <summary>
     /// Should a default response for "/" be mapped?
@@ -20,51 +24,62 @@ public class BffTestHost(TestHostContext context) : TestHost(context, new Uri("h
     public bool MapGetForRoot { get; set; } = true;
 
     public bool EnableBackChannelHandler { get; set; } = true;
-    public event Action<BffOptions> SetBffOptions = _ => { };
     public event Action<BffBuilder> OnConfigureBff = _ => { };
 
     public override void Initialize()
     {
-        BrowserClient = Internet.BuildHttpClient<BffHttpClient>(Url());
+        var baseAddress = Url();
+        BrowserClient = BuildBrowserClient(baseAddress);
+
         OnConfigureServices += services =>
         {
-            if (EnableBackChannelHandler)
+            services.AddSingleton<IForwarderHttpClientFactory>(
+                new CallbackForwarderHttpClientFactory(context => new HttpMessageInvoker(Internet)));
+
+            var builder = services.AddBff(options =>
             {
-                SetBffOptions += options =>
+                if (EnableBackChannelHandler)
                 {
                     options.BackchannelMessageHandler = Internet;
-                };
-            }
-
-            services.AddSingleton<IForwarderHttpClientFactory>(
-                new CallbackForwarderHttpClientFactory(
-                    context => new HttpMessageInvoker(Internet)));
-
-
-            var builder = services.AddBff(SetBffOptions);
+                }
+            });
 
             OnConfigureBff(builder);
         };
 
-        OnConfigure += app =>
-        {
-            app.UseRouting();
-
-            app.UseAuthentication();
-            app.UseAuthorization();
-
-            app.UseBff();
-        };
         OnConfigureEndpoints += endpoints =>
         {
             if (MapGetForRoot)
             {
                 endpoints.MapGet("/", () => DefaultRootResponse);
             }
-
-            endpoints.MapBffManagementEndpoints();
-
         };
+    }
+
+    public BffHttpClient BuildBrowserClient(Uri baseAddress, CookieContainer? cookieContainer = null)
+    {
+        cookieContainer ??= new CookieContainer();
+        var cookieHandler = new CookieHandler(Internet, cookieContainer);
+        var redirectHandler = new RedirectHandler(WriteOutput)
+        {
+            InnerHandler = cookieHandler
+        };
+
+        return new BffHttpClient(redirectHandler, cookieContainer, identityServer)
+        {
+            BaseAddress = baseAddress
+        };
+    }
+
+    protected override void ConfigureApp(IApplicationBuilder app)
+    {
+        app.UseRouting();
+
+        app.UseAuthentication();
+        app.UseAuthorization();
+
+        app.UseBff();
+        base.ConfigureApp(app);
     }
 
     public BffHttpClient BrowserClient

@@ -13,7 +13,8 @@ namespace Duende.Bff.Tests.MultiFrontend;
 public class FrontendSelectorTests
 {
     private readonly FrontendCollection _frontendCollection =
-        new(bffConfiguration: TestOptionsMonitor.Create(new BffConfiguration()));
+        new(plugins: [],
+            bffConfiguration: TestOptionsMonitor.Create(new BffConfiguration()));
 
     private readonly FrontendSelector _selector;
     private static readonly TestData The = new();
@@ -33,7 +34,7 @@ public class FrontendSelectorTests
 
     private BffFrontend NeverMatchingFrontEnd() => new BffFrontend
     {
-        Name = BffFrontendName.Parse("should not be found"),
+        Name = BffFrontendName.Parse("should_not_be_found"),
         SelectionCriteria = new FrontendSelectionCriteria()
         {
             MatchingOrigin = Origin.Parse("https://will-not-be-found"),

@@ -91,28 +91,28 @@ bffBuilder
             .MappedToPath(LocalPath.Parse("/with-path")),
 
         new BffFrontend(BffFrontendName.Parse("with-domain"))
-            .WithOpenIdConnectOptions(opt =>
-            {
-                opt.ClientId = "bff.multi-frontend.with-domain";
-                opt.ClientSecret = "secret";
-            })
-            .WithIndexHtmlUrl(new Uri("https://localhost:5005/static/index.html"))
-            .MappedToOrigin(Origin.Parse("https://app1.localhost:5005"))
-            .WithRemoteApis(
-                new RemoteApi(LocalPath.Parse("/api/user-token"), new Uri("https://localhost:5010")),
-                new RemoteApi(LocalPath.Parse("/api/client-token"), new Uri("https://localhost:5010"))
-                    .WithAccessToken(RequiredTokenType.Client),
-                new RemoteApi(LocalPath.Parse("/api/user-or-client-token"), new Uri("https://localhost:5010"))
-                    .WithAccessToken(RequiredTokenType.UserOrClient),
-                new RemoteApi(LocalPath.Parse("/api/anonymous"), new Uri("https://localhost:5010"))
-                    .WithAccessToken(RequiredTokenType.None),
-                new RemoteApi(LocalPath.Parse("/api/optional-user-token"), new Uri("https://localhost:5010"))
-                    .WithAccessToken(RequiredTokenType.UserOrNone),
-                new RemoteApi(LocalPath.Parse("/api/impersonation"), new Uri("https://localhost:5010"))
-                    .WithAccessTokenRetriever<ImpersonationAccessTokenRetriever>(),
-                new RemoteApi(LocalPath.Parse("/api/audience-constrained"), new Uri("https://localhost:5010"))
-                    .WithUserAccessTokenParameters(new BffUserAccessTokenParameters { Resource = Resource.Parse("urn:isolated-api") }))
-    )
+                .WithOpenIdConnectOptions(opt =>
+                {
+                    opt.ClientId = "bff.multi-frontend.with-domain";
+                    opt.ClientSecret = "secret";
+                })
+                .WithIndexHtmlUrl(new Uri("https://localhost:5005/static/index.html"))
+                .MappedToOrigin(Origin.Parse("https://app1.localhost:5005"))
+                .WithRemoteApis(
+                    new RemoteApi(LocalPath.Parse("/api/user-token"), new Uri("https://localhost:5010")),
+                    new RemoteApi(LocalPath.Parse("/api/client-token"), new Uri("https://localhost:5010"))
+                        .WithAccessToken(RequiredTokenType.Client),
+                    new RemoteApi(LocalPath.Parse("/api/user-or-client-token"), new Uri("https://localhost:5010"))
+                        .WithAccessToken(RequiredTokenType.UserOrClient),
+                    new RemoteApi(LocalPath.Parse("/api/anonymous"), new Uri("https://localhost:5010"))
+                        .WithAccessToken(RequiredTokenType.None),
+                    new RemoteApi(LocalPath.Parse("/api/optional-user-token"), new Uri("https://localhost:5010"))
+                        .WithAccessToken(RequiredTokenType.UserOrNone),
+                    new RemoteApi(LocalPath.Parse("/api/impersonation"), new Uri("https://localhost:5010"))
+                        .WithAccessTokenRetriever<ImpersonationAccessTokenRetriever>(),
+                    new RemoteApi(LocalPath.Parse("/api/audience-constrained"), new Uri("https://localhost:5010"))
+                        .WithUserAccessTokenParameters(new BffUserAccessTokenParameters { Resource = Resource.Parse("urn:isolated-api") }))
+        )
     .AddYarpConfig(BuildYarpRoutes(), [
         new ClusterConfig()
         {
@@ -152,12 +152,12 @@ app.Map("/static", staticApp =>
 });
 
 
-app.MapGet("/local/self-contained", (SelectedFrontend frontend, ClaimsPrincipal user) =>
+app.MapGet("/local/self-contained", (CurrentFrontendAccessor currentFrontendAccessor, ClaimsPrincipal user) =>
 {
 
     var data = new
     {
-        FrontendName = frontend.Get().Name.ToString(),
+        FrontendName = currentFrontendAccessor.Get().Name.ToString(),
         Message = "Hello from self-contained local API",
         User = user!.FindFirst("name")?.Value ?? user!.FindFirst("sub")!.Value
     };
@@ -165,7 +165,7 @@ app.MapGet("/local/self-contained", (SelectedFrontend frontend, ClaimsPrincipal 
     return data;
 });
 
-app.MapGet("/local/invokes-external-api", async (SelectedFrontend frontend, IHttpClientFactory httpClientFactory, HttpContext c, CancellationToken ct) =>
+app.MapGet("/local/invokes-external-api", async (CurrentFrontendAccessor currentFrontendAccessor, IHttpClientFactory httpClientFactory, HttpContext c, CancellationToken ct) =>
 {
     var httpClient = httpClientFactory.CreateClient("api");
     var apiResult = await httpClient.GetAsync("/user-token");
@@ -174,23 +174,13 @@ app.MapGet("/local/invokes-external-api", async (SelectedFrontend frontend, IHtt
 
     var data = new
     {
-        FrontendName = frontend.Get().Name.ToString(),
+        FrontendName = currentFrontendAccessor.Get().Name.ToString(),
         Message = "Hello from local API that invokes a remote api",
         RemoteApiResponse = deserialized
     };
 
     return data;
 });
-
-app.MapBffManagementEndpoints();
-
-
-
-
-
-
-
-
 
 app.Run();
 
@@ -242,11 +232,11 @@ RouteConfig[] BuildYarpRoutes()
 }
 
 
-public class CustomIndexHtmlClient(HttpClient client, SelectedFrontend selectedFrontend) : IIndexHtmlClient
+public class CustomIndexHtmlClient(HttpClient client, CurrentFrontendAccessor currentFrontendAccessor) : IIndexHtmlClient
 {
     public async Task<string?> GetIndexHtmlAsync(CancellationToken ct)
     {
-        if (!selectedFrontend.TryGet(out var frontend))
+        if (!currentFrontendAccessor.TryGet(out var frontend))
         {
             return null;
         }

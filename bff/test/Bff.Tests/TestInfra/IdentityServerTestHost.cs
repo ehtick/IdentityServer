@@ -119,36 +119,43 @@ public class IdentityServerTestHost : TestHost
             RedirectUris = [new Uri(uri, "signin-oidc").ToString()],
             PostLogoutRedirectUris = [new Uri(uri, "signout-callback-oidc").ToString()],
             AllowOfflineAccess = true,
-            AllowedScopes = { "openid", "profile", The.Scope },
+            AllowedScopes = { "openid", "profile", The.Scope, "offline_access" },
         };
         Clients.Add(client);
         return client;
     }
 
-    public Client AddClientFor(BffFrontend frontend, Uri baseUri, string? callbackPath = null)
+    public Client AddClientFor(BffFrontend frontend, IEnumerable<Uri> baseUris, string? callbackPath = null)
     {
         var options = new OpenIdConnectOptions();
         frontend.ConfigureOpenIdConnectOptions?.Invoke(options);
 
         var clientId = options.ClientId ?? frontend.Name;
+
+        var existing = Clients.FirstOrDefault(c => c.ClientId == clientId);
+        if (existing != null)
+        {
+            Clients.Remove(existing);
+        }
+
         var clientSecret = options.ClientSecret ?? The.ClientSecret;
         callbackPath ??= options.CallbackPath;
 
-        if (callbackPath == "/signin-oidc")
-        {
-            callbackPath = Constants.ManagementEndpoints.SigninUrl;
-        }
+        var redirectUris = baseUris
+            .Select(baseUri => new Uri(baseUri, (frontend.SelectionCriteria.MatchingPath ?? string.Empty) + callbackPath).ToString())
+            .ToList();
 
-        var redirectUri = new Uri(baseUri, (frontend.SelectionCriteria.MatchingPath ?? string.Empty) + callbackPath);
+        var postLogoutRedirectUris = baseUris
+            .Select(baseUri => new Uri(baseUri, options.SignedOutCallbackPath).ToString())
+            .ToList();
 
         var client = new Client()
         {
             ClientId = clientId,
             ClientSecrets = { new Secret(clientSecret.Sha256()) },
             AllowedGrantTypes = GrantTypes.CodeAndClientCredentials,
-            RedirectUris = [redirectUri.ToString()],
-            PostLogoutRedirectUris = ["/"], // not implemented
-            BackChannelLogoutUri = "/", // not implemented
+            RedirectUris = redirectUris,
+            PostLogoutRedirectUris = postLogoutRedirectUris,
             AllowOfflineAccess = true,
             AllowedScopes = options.Scope.Any()
                 ? options.Scope

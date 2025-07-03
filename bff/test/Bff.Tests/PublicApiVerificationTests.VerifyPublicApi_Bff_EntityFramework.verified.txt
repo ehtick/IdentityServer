@@ -20,6 +20,14 @@ namespace Duende.Bff.EntityFramework
     public static class ModelBuilderExtensions
     {
         public static void ConfigureSessionContext(this Microsoft.EntityFrameworkCore.ModelBuilder modelBuilder, Duende.Bff.EntityFramework.SessionStoreOptions storeOptions) { }
+        public class PartitionKeyConverter : Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<Duende.Bff.SessionManagement.SessionStore.PartitionKey, string>
+        {
+            public PartitionKeyConverter() { }
+        }
+        public class UserKeyConverter : Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<Duende.Bff.SessionManagement.SessionStore.UserKey, string>
+        {
+            public UserKeyConverter() { }
+        }
     }
     public class SessionDbContext : Duende.Bff.EntityFramework.SessionDbContext<Duende.Bff.EntityFramework.SessionDbContext>
     {
@@ -50,7 +58,6 @@ namespace Duende.Bff.EntityFramework
     public class UserSessionEntity : Duende.Bff.SessionManagement.SessionStore.UserSession
     {
         public UserSessionEntity() { }
-        public string? ApplicationName { get; set; }
         public long Id { get; set; }
     }
 }

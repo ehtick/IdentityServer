@@ -6,7 +6,9 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Duende.Bff.AccessTokenManagement;
 using Duende.Bff.DynamicFrontends;
+using Duende.Bff.SessionManagement.SessionStore;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 
@@ -29,7 +31,8 @@ public class TestData
     public Origin Origin = Origin.Parse($"https://{PropertyName()}:1234");
     public int Port = 1234;
     public PathString Path = new PathString($"/{PropertyName()}");
-    public PathString SubPath = new PathString($"/{PropertyName(nameof(Path))}/{PropertyName()}");
+    public PathString SubPath = new PathString($"/{PropertyName()}");
+    public PathString PathAndSubPath = new PathString($"/{PropertyName(nameof(Path))}/{PropertyName(nameof(SubPath))}");
     public string Scope = PropertyName();
     public string RouteId = PropertyName();
     public string ClusterId = PropertyName();
@@ -41,6 +44,16 @@ public class TestData
     public TimeSpan? MaxAge = TimeSpan.FromDays(10);
     public RequiredTokenType RequiredTokenType = RequiredTokenType.UserOrClient;
     public Uri CallbackPath => new Uri("/" + PropertyName(), UriKind.Relative);
+
+    public FakeTimeProvider Clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+
+    public DateTimeOffset CurrentTime => Clock.GetUtcNow();
+
+    public PartitionKey PartitionKey = PartitionKey.Parse(PropertyName());
+
+    public UserKey UserKey = UserKey.Parse(PropertyName());
+    public UserSessionKey UserSessionKey => new UserSessionKey(PartitionKey, UserKey);
+
     public Type TokenRetrieverType = typeof(TestTokenRetriever);
 
     public Resource Resource = Resource.Parse(PropertyName());
@@ -82,6 +95,7 @@ public class TestData
             opt.Scope.Add("openid");
             opt.Scope.Add("profile");
             opt.Scope.Add(Scope);
+            opt.SignedOutRedirectUri = "/";
         };
 
         DefaultOpenIdConnectConfiguration(OpenIdConnectOptions);

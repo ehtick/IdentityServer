@@ -3,29 +3,37 @@
 
 using Duende.Bff.Otel;
 using Duende.Bff.SessionManagement.SessionStore;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
-namespace Duende.Bff.EntityFramework;
+namespace Duende.Bff.EntityFramework.Internal;
 
 /// <summary>
 /// Entity framework core implementation of IUserSessionStore
 /// </summary>
-internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessionDbContext sessionDbContext, ILogger<UserSessionStore> logger) : IUserSessionStore, IUserSessionStoreCleanup
+#pragma warning disable CA1812 // internal class never instantiated? It is, but via DI
+internal sealed class UserSessionStore(
+    ISessionDbContext sessionDbContext,
+    ILogger<UserSessionStore> logger)
+    : IUserSessionStore, IUserSessionStoreCleanup
+#pragma warning restore CA1812 
 {
-    private readonly string? _applicationDiscriminator = options.Value.ApplicationDiscriminator;
-
     /// <inheritdoc/>
     public async Task CreateUserSessionAsync(UserSession session, CT ct)
     {
-        LogMessages.CreatingUserSession(logger, session.SubjectId, session.SessionId);
-
-        var item = new UserSessionEntity()
+        if (!session.PartitionKey.HasValue)
         {
-            ApplicationName = _applicationDiscriminator
-        };
+            throw new InvalidOperationException(nameof(session.PartitionKey) + " cannot be null");
+        }
+
+        if (!session.Key.HasValue)
+        {
+            throw new InvalidOperationException(nameof(session.Key));
+        }
+
+        logger.CreatingUserSession(LogLevel.Debug, session.SubjectId, session.SessionId);
+
+        var item = new UserSessionEntity();
         session.CopyTo(item);
         sessionDbContext.UserSessions.Add(item);
 
@@ -46,30 +54,36 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
             // SQL Server would send:  ---> Microsoft.Data.SqlClient.SqlException (0x80131904): Cannot insert duplicate key row in object 'Session.UserSessions' with unique index 'IX_UserSessions_ApplicationName_SessionId'. The duplicate key value is (<AppName>, <SessionIdValue>).
             // Postgres would send:  ---> Npgsql.PostgresException (0x80004005): 23505: duplicate key value violates unique constraint "IX_UserSessions_ApplicationName_SessionId"
             // MySQL would send:    ---> MySql.Data.MySqlClient.MySqlException (0x80004005): Duplicate entry '<AppName>-<SessionIdValue>' for key 'IX_UserSessions_ApplicationName_SessionId'
-            if (exception.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase) || exception.Contains("IX_UserSessions_ApplicationName_SessionId"))
+
+            if (exception.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase) ||
+                exception.Contains("IX_UserSessions_ApplicationName_SessionId", StringComparison.OrdinalIgnoreCase))
             {
-                LogMessages.DuplicateSessionInsertDetected(logger, ex);
+                logger.DuplicateSessionInsertDetected(LogLevel.Debug, ex);
             }
             else
             {
-                LogMessages.ExceptionCreatingSession(logger, ex, ex.Message);
+                logger.ExceptionCreatingSession(LogLevel.Warning, ex, ex.Message);
             }
         }
     }
 
     /// <inheritdoc/>
-    public async Task DeleteUserSessionAsync(string key, CT ct)
+    public async Task DeleteUserSessionAsync(UserSessionKey key, CT ct)
     {
-        var items = await sessionDbContext.UserSessions.Where(x => x.Key == key && x.ApplicationName == _applicationDiscriminator).ToArrayAsync(ct);
-        var item = items.SingleOrDefault(x => x.Key == key && x.ApplicationName == _applicationDiscriminator);
+        var userKey = key.UserKey;
+        var partitionKey = key.PartitionKey;
+        var items = await sessionDbContext.UserSessions
+            .Where(x => x.Key == userKey && x.PartitionKey == partitionKey)
+            .ToArrayAsync(ct);
+        var item = items.SingleOrDefault(x => x.Key == userKey && x.PartitionKey == partitionKey);
 
         if (item == null)
         {
-            LogMessages.NoRecordFoundForKey(logger, key);
+            logger.NoRecordFoundForKey(LogLevel.Debug, key);
             return;
         }
 
-        LogMessages.DeletingUserSession(logger, item.SubjectId, item.SessionId);
+        logger.DeletingUserSession(LogLevel.Debug, item.SubjectId, item.SessionId);
 
         sessionDbContext.UserSessions.Remove(item);
         try
@@ -80,7 +94,7 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
         {
             // suppressing exception for concurrent deletes
             // https://github.com/DuendeSoftware/BFF/issues/63
-            LogMessages.DbUpdateConcurrencyException(logger, ex.Message);
+            logger.DbUpdateConcurrencyException(LogLevel.Debug, ex.Message);
 
             foreach (var entry in ex.Entries)
             {
@@ -91,11 +105,10 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
     }
 
     /// <inheritdoc/>
-    public async Task DeleteUserSessionsAsync(UserSessionsFilter filter, CT ct)
+    public async Task DeleteUserSessionsAsync(PartitionKey partitionKey, UserSessionsFilter filter, CT ct)
     {
         filter.Validate();
-
-        var query = sessionDbContext.UserSessions.Where(x => x.ApplicationName == _applicationDiscriminator).AsQueryable();
+        var query = sessionDbContext.UserSessions.Where(x => x.PartitionKey == partitionKey).AsQueryable();
         if (!string.IsNullOrWhiteSpace(filter.SubjectId))
         {
             query = query.Where(x => x.SubjectId == filter.SubjectId);
@@ -106,7 +119,7 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
             query = query.Where(x => x.SessionId == filter.SessionId);
         }
 
-        var items = await query.Where(x => x.ApplicationName == _applicationDiscriminator).ToArrayAsync(ct);
+        var items = await query.Where(x => x.PartitionKey == partitionKey).ToArrayAsync(ct);
         if (!string.IsNullOrWhiteSpace(filter.SubjectId))
         {
             items = items.Where(x => x.SubjectId == filter.SubjectId).ToArray();
@@ -117,7 +130,7 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
             items = items.Where(x => x.SessionId == filter.SessionId).ToArray();
         }
 
-        LogMessages.DeletingUserSessions(logger, items.Length, filter.SubjectId, filter.SessionId);
+        logger.DeletingUserSessions(LogLevel.Debug, items.Length, filter.SubjectId, filter.SessionId);
 
         sessionDbContext.UserSessions.RemoveRange(items);
 
@@ -129,43 +142,44 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
         {
             // suppressing exception for concurrent deletes
             // https://github.com/DuendeSoftware/BFF/issues/63
-            LogMessages.DbUpdateConcurrencyException(logger, ex.Message);
+            logger.DbUpdateConcurrencyException(LogLevel.Debug, ex.Message);
 
             foreach (var entry in ex.Entries)
             {
-                // mark detatched so another call to SaveChangesAsync won't throw again
+                // mark detached so another call to SaveChangesAsync won't throw again
                 entry.State = EntityState.Detached;
             }
         }
     }
 
     /// <inheritdoc/>
-    public async Task<UserSession?> GetUserSessionAsync(string key, CT ct)
+    public async Task<UserSession?> GetUserSessionAsync(UserSessionKey key, CT ct)
     {
-        var items = await sessionDbContext.UserSessions.Where(x => x.Key == key && x.ApplicationName == _applicationDiscriminator).ToArrayAsync(ct);
-        var item = items.SingleOrDefault(x => x.Key == key && x.ApplicationName == _applicationDiscriminator);
+        var userKey = key.UserKey;
+        var partitionKey = key.PartitionKey;
+        var items = await sessionDbContext.UserSessions.Where(x => x.Key == userKey && x.PartitionKey == partitionKey)
+            .ToArrayAsync(ct);
+        var item = items.SingleOrDefault(x => x.Key == userKey && x.PartitionKey == partitionKey);
 
-        UserSession? result = null;
         if (item == null)
         {
-            LogMessages.NoRecordFoundForKey(logger, key);
+            logger.NoRecordFoundForKey(LogLevel.Debug, key);
             return null;
         }
 
-        LogMessages.GettingUserSession(logger, item.SubjectId, item.SessionId);
+        logger.GettingUserSession(LogLevel.Debug, item.SubjectId, item.SessionId);
 
-        result = new UserSession();
+        var result = new UserSession();
         item.CopyTo(result);
 
         return result;
     }
 
     /// <inheritdoc/>
-    public async Task<IReadOnlyCollection<UserSession>> GetUserSessionsAsync(UserSessionsFilter filter, CT ct)
+    public async Task<IReadOnlyCollection<UserSession>> GetUserSessionsAsync(PartitionKey partitionKey, UserSessionsFilter filter, CT ct)
     {
         filter.Validate();
-
-        var query = sessionDbContext.UserSessions.Where(x => x.ApplicationName == _applicationDiscriminator).AsQueryable();
+        var query = sessionDbContext.UserSessions.Where(x => x.PartitionKey == partitionKey).AsQueryable();
         if (!string.IsNullOrWhiteSpace(filter.SubjectId))
         {
             query = query.Where(x => x.SubjectId == filter.SubjectId);
@@ -176,7 +190,7 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
             query = query.Where(x => x.SessionId == filter.SessionId);
         }
 
-        var items = await query.Where(x => x.ApplicationName == _applicationDiscriminator).ToArrayAsync(ct);
+        var items = await query.Where(x => x.PartitionKey == partitionKey).ToArrayAsync(ct);
         if (!string.IsNullOrWhiteSpace(filter.SubjectId))
         {
             items = items.Where(x => x.SubjectId == filter.SubjectId).ToArray();
@@ -194,23 +208,28 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
             return item;
         }).ToArray();
 
-        LogMessages.GettingUserSessions(logger, results.Length, filter.SubjectId, filter.SessionId);
+        logger.GettingUserSessions(LogLevel.Debug, results.Length, filter.SubjectId, filter.SessionId);
 
         return results;
     }
 
     /// <inheritdoc/>
-    public async Task UpdateUserSessionAsync(string key, UserSessionUpdate session, CT ct)
+    public async Task UpdateUserSessionAsync(UserSessionKey key, UserSessionUpdate session, CT ct)
     {
-        var items = await sessionDbContext.UserSessions.Where(x => x.Key == key && x.ApplicationName == _applicationDiscriminator).ToArrayAsync(ct);
-        var item = items.SingleOrDefault(x => x.Key == key && x.ApplicationName == _applicationDiscriminator);
+        var userKey = key.UserKey;
+        var partitionKey = key.PartitionKey;
+
+        var items = await sessionDbContext.UserSessions
+            .Where(x => x.Key == userKey && x.PartitionKey == partitionKey)
+            .ToArrayAsync(ct);
+        var item = items.SingleOrDefault(x => x.Key == userKey && x.PartitionKey == partitionKey);
         if (item == null)
         {
-            LogMessages.NoRecordFoundForKey(logger, key);
+            logger.NoRecordFoundForKey(LogLevel.Debug, key);
             return;
         }
 
-        LogMessages.UpdatingUserSession(logger, item.SubjectId, item.SessionId);
+        logger.UpdatingUserSession(LogLevel.Debug, item.SubjectId, item.SessionId);
 
         session.CopyTo(item);
         await sessionDbContext.SaveChangesAsync(ct);
@@ -239,7 +258,7 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
                 continue;
             }
 
-            LogMessages.RemovingServerSideSessions(logger, found);
+            logger.RemovingServerSideSessions(LogLevel.Debug, found);
 
             sessionDbContext.UserSessions.RemoveRange(expired);
             removed += found;
@@ -250,7 +269,7 @@ internal class UserSessionStore(IOptions<DataProtectionOptions> options, ISessio
             catch (DbUpdateConcurrencyException ex)
             {
                 // suppressing exception for concurrent deletes
-                LogMessages.DbUpdateConcurrencyException(logger, ex.Message);
+                logger.DbUpdateConcurrencyException(LogLevel.Debug, ex.Message);
 
                 foreach (var entry in ex.Entries)
                 {

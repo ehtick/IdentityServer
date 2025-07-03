@@ -8,23 +8,19 @@ using Xunit.Abstractions;
 
 namespace Duende.Bff.Tests.Endpoints.Management;
 
-public class LoginEndpointTests : BffTestBase
+public class LoginEndpointTests(ITestOutputHelper output) : BffTestBase(output)
 {
-    public LoginEndpointTests(ITestOutputHelper output) : base(output)
+    public override async Task InitializeAsync()
     {
-        IdentityServer.AddClient(The.ClientId, Bff.Url());
-        Bff.SetBffOptions += options =>
-        {
-            options.ConfigureOpenIdConnectDefaults = opt =>
-            {
-                The.DefaultOpenIdConnectConfiguration(opt);
-            };
-        };
+        await base.InitializeAsync();
+        Bff.BffOptions.ConfigureOpenIdConnectDefaults = opt => { The.DefaultOpenIdConnectConfiguration(opt); };
     }
 
-    [Fact]
-    public async Task login_should_allow_anonymous()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_should_allow_anonymous(BffSetupType setup)
     {
+        await ConfigureBff(setup);
 
         Bff.OnConfigureServices += svcs =>
         {
@@ -36,16 +32,16 @@ public class LoginEndpointTests : BffTestBase
                         .Build();
             });
         };
-        await InitializeAsync();
 
         var response = await Bff.BrowserClient.Login();
         response.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized);
     }
 
-    [Fact]
-    public async Task when_unauthenticated_silent_login_should_return_isLoggedIn_false()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task when_unauthenticated_silent_login_should_return_isLoggedIn_false(BffSetupType setup)
     {
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         var response = await Bff.BrowserClient.GetAsync(Bff.Url("/bff/silent-login?redirectUri=/"))
             .CheckHttpStatusCode();
@@ -56,10 +52,11 @@ public class LoginEndpointTests : BffTestBase
         message.ShouldContain("isLoggedIn:false");
     }
 
-    [Fact]
-    public async Task silent_login_should_challenge_and_return_silent_login_html()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task silent_login_should_challenge_and_return_silent_login_html(BffSetupType setup)
     {
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         await Bff.BrowserClient.Login();
 
@@ -75,10 +72,11 @@ public class LoginEndpointTests : BffTestBase
         message.ShouldContain($"isLoggedIn:true");
     }
 
-    [Fact]
-    public async Task can_issue_silent_login_with_prompt_none()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task can_issue_silent_login_with_prompt_none(BffSetupType setup)
     {
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         await Bff.BrowserClient.Login();
 
@@ -94,10 +92,11 @@ public class LoginEndpointTests : BffTestBase
         message.ShouldContain($"isLoggedIn:true");
     }
 
-    [Fact]
-    public async Task login_with_unsupported_prompt_is_rejected()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_with_unsupported_prompt_is_rejected(BffSetupType setup)
     {
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         var response = await Bff.BrowserClient.GetAsync(Bff.Url("/bff/login?prompt=not_supported_prompt"));
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
@@ -107,10 +106,11 @@ public class LoginEndpointTests : BffTestBase
         problem!.Errors["prompt"].ShouldContain("prompt 'not_supported_prompt' is not supported");
     }
 
-    [Fact]
-    public async Task can_use_prompt_supported_by_IdentityServer()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task can_use_prompt_supported_by_IdentityServer(BffSetupType setup)
     {
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         // Prompt=create is enabled in identity server configuration:
         // https://docs.duendesoftware.com/identityserver/reference/options#userinteraction
@@ -119,51 +119,31 @@ public class LoginEndpointTests : BffTestBase
         var response = await Bff.BrowserClient.GetAsync(Bff.Url("/bff/login?prompt=create"))
             .CheckHttpStatusCode();
 
-        response.RequestMessage!.RequestUri!.ToString().ShouldStartWith(IdentityServer.Url("/account/create").ToString());
+        response.RequestMessage!.RequestUri!.ToString()
+            .ShouldStartWith(IdentityServer.Url("/account/create").ToString());
         response.RequestMessage!.RequestUri!.ToString().ShouldNotContain("error");
     }
 
-    [Fact]
-    public async Task login_endpoint_should_authenticatre_and_redirect_to_root()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_endpoint_should_authenticatre_and_redirect_to_root(BffSetupType setup)
     {
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         var response = await Bff.BrowserClient.Login();
         response.RequestMessage!.RequestUri.ShouldBe(Bff.Url("/"));
-
     }
 
-    [Fact]
-    public async Task login_endpoint_should_challenge_and_redirect_to_root_with_custom_prefix()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_endpoint_should_challenge_and_redirect_to_root_with_custom_prefix(BffSetupType setup)
     {
         Bff.OnConfigureServices += svcs =>
         {
-            svcs.Configure<BffOptions>(options =>
-            {
-                options.ManagementBasePath = "/custom/bff";
-            });
+            svcs.Configure<BffOptions>(options => { options.ManagementBasePath = "/custom/bff"; });
         };
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
-        await Bff.BrowserClient.Login(expectedStatusCode: HttpStatusCode.NotFound);
-
-
-        var response = await Bff.BrowserClient.Login("/custom");
-        response.RequestMessage!.RequestUri.ShouldBe(Bff.Url("/"));
-
-    }
-
-    [Fact]
-    public async Task login_endpoint_should_challenge_and_redirect_to_root_with_custom_prefix_trailing_slash()
-    {
-        Bff.OnConfigureServices += svcs =>
-        {
-            svcs.Configure<BffOptions>(options =>
-            {
-                options.ManagementBasePath = "/custom/bff/";
-            });
-        };
-        await InitializeAsync();
 
         await Bff.BrowserClient.Login(expectedStatusCode: HttpStatusCode.NotFound);
 
@@ -171,29 +151,47 @@ public class LoginEndpointTests : BffTestBase
         response.RequestMessage!.RequestUri.ShouldBe(Bff.Url("/"));
     }
 
-    [Fact]
-    public async Task login_endpoint_should_challenge_and_redirect_to_root_with_root_prefix()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_endpoint_should_challenge_and_redirect_to_root_with_custom_prefix_trailing_slash(
+        BffSetupType setup)
     {
         Bff.OnConfigureServices += svcs =>
         {
-            svcs.Configure<BffOptions>(options =>
-            {
-                options.ManagementBasePath = "/";
-            });
+            svcs.Configure<BffOptions>(options => { options.ManagementBasePath = "/custom/bff/"; });
         };
-        await InitializeAsync();
+
+        await ConfigureBff(setup);
+
+
+        await Bff.BrowserClient.Login(expectedStatusCode: HttpStatusCode.NotFound);
+
+        var response = await Bff.BrowserClient.Login("/custom");
+        response.RequestMessage!.RequestUri.ShouldBe(Bff.Url("/"));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_endpoint_should_challenge_and_redirect_to_root_with_root_prefix(BffSetupType setup)
+    {
+        Bff.OnConfigureServices += svcs =>
+        {
+            svcs.Configure<BffOptions>(options => { options.ManagementBasePath = "/"; });
+        };
+
+        await ConfigureBff(setup);
 
         var response = await Bff.BrowserClient.GetAsync(Bff.Url("/login"))
             .CheckHttpStatusCode();
 
         response.RequestMessage!.RequestUri.ShouldBe(Bff.Url("/"));
-
     }
 
-    [Fact]
-    public async Task login_endpoint_with_existing_session_should_challenge()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_endpoint_with_existing_session_should_challenge(BffSetupType setup)
     {
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         await Bff.BrowserClient.Login();
 
@@ -204,12 +202,12 @@ public class LoginEndpointTests : BffTestBase
         response.Headers.Location!.ToString().ShouldStartWith(IdentityServer.Url("/connect/authorize").ToString());
     }
 
-    [Fact]
-    public async Task login_endpoint_should_accept_returnUrl()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_endpoint_should_accept_returnUrl(BffSetupType setup)
     {
         Bff.OnConfigureEndpoints += endpoints => endpoints.MapGet("/foo", () => "foo'd you");
-
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         var response = await Bff.BrowserClient.GetAsync(Bff.Url("/bff/login") + "?returnUrl=/foo")
             .CheckHttpStatusCode();
@@ -218,10 +216,11 @@ public class LoginEndpointTests : BffTestBase
         result.ShouldBe("foo'd you");
     }
 
-    [Fact]
-    public async Task login_endpoint_should_not_accept_non_local_returnUrl()
+    [Theory]
+    [MemberData(nameof(AllSetups))]
+    public async Task login_endpoint_should_not_accept_non_local_returnUrl(BffSetupType setup)
     {
-        await InitializeAsync();
+        await ConfigureBff(setup);
 
         var problem = await Bff.BrowserClient.GetAsync(Bff.Url("/bff/login") + "?returnUrl=https://foo")
             .ShouldBeProblem();
